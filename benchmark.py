@@ -3,6 +3,8 @@ from src.serial.dijkstra import dijkstra
 from src.serial.delta_stepping import delta_stepping
 from src.serial.radius_stepping import radius_stepping
 
+from src.parallel.delta_stepping_pl import delta_stepping_multiprocessing
+
 import networkx as nx
 import time
 import random
@@ -25,6 +27,8 @@ if __name__ == '__main__':
     source = 0
     delta = 5
     r = 7
+
+    print("SERIAL:\n")
 
     bf_start = time.perf_counter()
     bellman_ford_result = bellman_ford(G, source)
@@ -49,8 +53,18 @@ if __name__ == '__main__':
     assert(delta_stepping_result == bellman_ford_result)
     assert(radius_stepping_result == bellman_ford_result)
 
-    print("Correctness checks passed!")
+    print("Correctness checks passed!\n")
     # print("Bellman-Ford Distances:", bellman_ford_result)
     # print("Dijkstra Distances:", dijkstra_result)
     # print("Delta-stepping Distances:", delta_stepping_result)
     # print("Radius-stepping Distances:", radius_stepping_result)
+
+    print("PARALLEL:\n")
+
+    delta_step_pl_start = time.perf_counter()
+    delta_stepping_pl_result = delta_stepping_multiprocessing(G, source, delta)
+    delta_pl_duration = time.perf_counter() - delta_step_pl_start
+    print(f"{'Delta-stepping Time:':<25} {delta_pl_duration:.20f}")
+
+    assert(delta_stepping_pl_result == bellman_ford_result)
+    print("Correctness checks passed!")
