@@ -1,19 +1,23 @@
-# Makefile
 CXX = g++
-CXXFLAGS = -O2 -std=c++11 -fopenmp
+CXXFLAGS = -fopenmp
+TARGETS = delta_stepping_parallel check dijkstra delta_stepping_serial
 
-TARGET = delta_stepping
-OBJFILES = delta_stepping.o random_graph.o
+all: $(TARGETS)
 
-.PHONY: all clean
+delta_stepping_parallel: delta_stepping.cpp load_graph.o
+	$(CXX) $(CXXFLAGS) -o $@ $< load_graph.o
 
-all: $(TARGET)
+check: check.cpp load_graph.o
+	$(CXX) $(CXXFLAGS) -o $@ $< load_graph.o
 
-$(TARGET): $(OBJFILES)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+dijkstra: dijkstra.cpp load_graph.o
+	$(CXX) $(CXXFLAGS) -o $@ $< load_graph.o
 
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+delta_stepping_serial: delta_stepping_serial.cpp load_graph.o
+	$(CXX) $(CXXFLAGS) -o $@ $< load_graph.o
+
+load_graph.o: load_graph.cpp load_graph.h
+	$(CXX) $(CXXFLAGS) -c $<
 
 clean:
-	rm -f $(TARGET) $(OBJFILES)
+	rm -f delta_stepping dijkstra check load_graph delta_stepping_serial *.o

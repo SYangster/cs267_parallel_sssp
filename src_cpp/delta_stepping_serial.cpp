@@ -1,4 +1,3 @@
-#pragma GCC optimize(3)
 #include <iostream>
 #include <vector>
 #include <queue>
@@ -7,7 +6,6 @@
 #include <set>
 #include <memory>
 #include <cmath> // for sqrt function
-#include <omp.h>
 #include <chrono>
 #include "load_graph.h"
 
@@ -47,7 +45,7 @@ void relax(int w, int d, vector<int> &distances, int delta) {
     }
 }
 
-void delta_stepping_parallel(int source, vector<vector<edge>> &graph, vector<int> &distances, int delta)
+void delta_stepping_serial(int source, vector<vector<edge>> &graph, vector<int> &distances, int delta)
 {   
 
     max_bucket = 0;
@@ -65,7 +63,6 @@ void delta_stepping_parallel(int source, vector<vector<edge>> &graph, vector<int
             REQ.clear();
 
             // look for vertices within delta
-            #pragma omp for
             for (int i = 0; i < B[j].size(); i++){
                 int v = B[j][i];
                 for (int k=0; k<graph[v].size(); k++){
@@ -82,15 +79,13 @@ void delta_stepping_parallel(int source, vector<vector<edge>> &graph, vector<int
             B[j].clear();
             
             // relax light edges
-            #pragma omp for
             for (int i=0; i<REQ.size(); i++){
                 relax(REQ[i].w, REQ[i].d, distances, delta);
             }
         }
         REQ.clear();
 
-        // heavy edges
-        #pragma omp for
+        // heavy edge
         for (int i=0; i<S.size(); i++) {
             int v = S[i];
             for (int k=0; k<graph[v].size(); k++){
@@ -103,8 +98,7 @@ void delta_stepping_parallel(int source, vector<vector<edge>> &graph, vector<int
                 }
             }
         }
-        
-        #pragma omp for 
+     
         for (int i=0; i<REQ.size(); i++)
             relax(REQ[i].w, REQ[i].d, distances, delta);
         j++;
@@ -120,8 +114,6 @@ int main(int argc, char* argv[])
 
     string input = argv[1];
     string file_path;
-
-    omp_set_num_threads(8);
 
     // printf("%d\n", correctness_check());
 
@@ -150,12 +142,12 @@ int main(int argc, char* argv[])
     int delta = 2000;
 
     auto start_time = std::chrono::high_resolution_clock::now();
-    delta_stepping_parallel(0, graph, distances_delta_p, delta);
+    delta_stepping_serial(0, graph, distances_delta_p, delta);
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(end_time - start_time).count();
 
     // Print the time taken
-    printf("Time taken for delta_stepping parallel: %f\n", duration);
+    printf("Time taken for delta_stepping serial: %f\n", duration);
 
     return 0;
 }
