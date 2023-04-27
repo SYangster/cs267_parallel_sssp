@@ -1,4 +1,3 @@
-#pragma GCC optimize(3)
 #include <iostream>
 #include <vector>
 #include <queue>
@@ -64,6 +63,12 @@ void delta_stepping_parallel(int source, vector<vector<edge>> &graph, vector<int
         {
             REQ.clear();
 
+            #pragma omp parallel
+            {
+                int thread_id = omp_get_thread_num();
+                printf("Hello from thread %d\n", thread_id);
+            }
+
             // look for vertices within delta
             #pragma omp for
             for (int i = 0; i < B[j].size(); i++){
@@ -121,8 +126,15 @@ int main(int argc, char* argv[])
     string input = argv[1];
     string file_path;
 
-    omp_set_num_threads(8);
-
+    omp_set_num_threads(4);
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            int num_threads = omp_get_num_threads();
+            std::cout << "Number of threads in parallel region: " << num_threads << std::endl;
+        }
+    }
     // printf("%d\n", correctness_check());
 
     if (input == "NY") {
