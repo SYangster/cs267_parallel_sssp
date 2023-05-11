@@ -82,7 +82,9 @@ void delta_stepping_serial(int source, vector<vector<edge>> &graph, vector<int> 
             for (int i=0; i<REQ.size(); i++){
                 relax(REQ[i].w, REQ[i].d, distances, delta);
             }
+
         }
+        
         REQ.clear();
 
         // heavy edge
@@ -94,25 +96,34 @@ void delta_stepping_serial(int source, vector<vector<edge>> &graph, vector<int> 
                     req r;
                     r.w = graph[v][k].to;
                     r.d = distances[v] + graph[v][k].cost;
+                    if (j == 1) printf("S_heavy %d %d \n", r.w, r.d);
                     REQ.push_back(r);
                 }
             }
         }
      
-        for (int i=0; i<REQ.size(); i++)
+        for (int i=0; i<REQ.size(); i++){
             relax(REQ[i].w, REQ[i].d, distances, delta);
+        }
+        if (j == 1) {
+                for (int i: B[2]){
+                    printf("here %d %d \n", i, j);
+                }
+            }
         j++;
     }
 }
 
 int main(int argc, char* argv[])
 {
-    if (argc < 2) {
+    if (argc < 3) {
         cerr << "Usage: " << argv[0] << " <dataset>" << endl;
         return 1;
     }
 
     string input = argv[1];
+    string input2 = argv[2];
+    int delta = stoi(input2);
     string file_path;
 
     // printf("%d\n", correctness_check());
@@ -139,7 +150,7 @@ int main(int argc, char* argv[])
     cout << "Number of edges: " << num_edges << endl;
 
     vector<int> distances_delta_p;
-    int delta = 2000;
+    // int delta = 2000;
 
     auto start_time = std::chrono::high_resolution_clock::now();
     delta_stepping_serial(0, graph, distances_delta_p, delta);

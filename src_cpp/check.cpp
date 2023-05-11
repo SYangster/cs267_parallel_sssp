@@ -10,18 +10,25 @@
 #include <cmath> // for sqrt function
 #include <omp.h>
 #include <tuple>
+#include <mutex>
+#include <unordered_set>
 #include "load_graph.h"
 
 using namespace std;
 const int INF = numeric_limits<int>::max();
 
-#define N 100000
+#define N 300000
 
 int max_bucket;
-vector<int> B[N];
+unordered_set<int> B[N];
 vector<int> S;
 struct req{int w,d;};
 vector<req> REQ;
+std::vector<std::mutex> B_mutex(N);
+std::vector<std::mutex>* distances_mutex;
+
+vector<vector<req>> REQ_local(omp_get_max_threads());
+vector<vector<int>> S_local(omp_get_max_threads());
 
 
 #define clear_distances() { \
@@ -39,81 +46,174 @@ bool bempty(int j){
 
 // w is the vertice to go to; d is the distance
 void relax(int w, int d, vector<int> &distances, int delta) {
+    (*distances_mutex)[w].lock();
     if (d < distances[w]) {
-        if (distances[w] != INF){
-            
-            vector<int>::iterator res = find(B[distances[w] / delta].begin(), B[distances[w] / delta].end(), w);
-            if (res != B[distances[w]/delta].end()) {
-                B[distances[w] / delta].erase(res);
-            }
-        }
-
-        B[d/delta].push_back(w);
-        if (d/delta > max_bucket) max_bucket = d/delta;
         distances[w] = d;
+        int bucket_index = distances[w] / delta;
+        (*distances_mutex)[w].unlock();
+        
+        B_mutex[bucket_index].lock();
+        B[bucket_index].erase(w);
+        B_mutex[bucket_index].unlock();
+
+        B_mutex[d / delta].lock();
+        B[d / delta].insert(w);
+        B_mutex[d / delta].unlock();
+
+        if (d / delta > max_bucket) max_bucket = d / delta;
+    } else {
+        (*distances_mutex)[w].unlock();
     }
 }
 
-void delta_stepping_parallel(int source, vector<vector<edge>> &graph, vector<int> &distances, int delta)
-{   
+
+void delta_stepping_parallel(int source, vector<vector<edge>> &graph, vector<int> &distances, int delta) {
+    max_bucket = 0;
+    int n = graph.size();
+    distances.assign(n, INF);
+    relax(source, 0, distances, delta);
+
+    int j = 0;
+    while (!bempty(j)) {
+        S.clear();
+
+        while (!B[j].empty()) {
+            REQ.clear();
+
+            #pragma omp parallel
+            {
+                int tid = omp_get_thread_num();
+
+                #pragma omp single
+                for (std::unordered_set<int>::iterator it = B[j].begin(); it != B[j].end(); ++it) {
+                    int v = *it;
+                    for (int k = 0; k < graph[v].size(); k++) {
+                        if (graph[v][k].cost <= delta) {
+                            req r;
+                            r.w = graph[v][k].to;
+                            r.d = distances[v] + graph[v][k].cost;
+                            REQ_local[tid].push_back(r);
+                        }
+                    }
+                    S_local[tid].push_back(v);
+                }
+
+                // Merge REQ_local and S_local into REQ and S using a single thread
+                #pragma omp single
+                {
+                    for (const auto &local_reqs : REQ_local) {
+                        REQ.insert(REQ.end(), local_reqs.begin(), local_reqs.end());
+                    }
+
+                    for (const auto &local_s : S_local) {
+                        S.insert(S.end(), local_s.begin(), local_s.end());
+                    }
+
+                    for (auto &local_reqs : REQ_local) {
+                        local_reqs.clear();
+                    }
+
+                    for (auto &local_s : S_local) {
+                        local_s.clear();
+                    }
+
+                    B[j].clear();
+                }
+
+                // Relax light edges
+                #pragma omp for
+                for (int i = 0; i < REQ.size(); i++) {
+                    relax(REQ[i].w, REQ[i].d, distances, delta);
+                }
+            }
+
+            // Clear REQ
+            REQ.clear();
+        }
+
+        // Heavy edges
+        #pragma omp parallel
+        {
+            int tid = omp_get_thread_num();
+
+            #pragma omp for
+            for (int i = 0; i < S.size(); i++) {
+                int v = S[i];
+                for (int k = 0; k < graph[v].size(); k++) {
+                    if (graph[v][k].cost > delta) {
+                        relax(graph[v][k].to, distances[v] + graph[v][k].cost, distances, delta);
+                    }
+                }
+            }
+        }
+        j++;
+    }
+}
+
+void delta_stepping_parallel_local(int source, vector<vector<edge>> &graph, vector<int> &distances, int delta)
+{
 
     max_bucket = 0;
     int n = graph.size();
     distances.assign(n, INF);
-    
     relax(source, 0, distances, delta);
     
     int j = 0;
-    while(!bempty(j)){
+    while (!bempty(j)) {
         S.clear();
 
-        while (!B[j].empty())
-        {
-            REQ.clear();
-
-            // look for vertices within delta
-            #pragma omp for
-            for (int i = 0; i < B[j].size(); i++){
-                int v = B[j][i];
-                for (int k=0; k<graph[v].size(); k++){
-                    // add requests: from v to light neighbors
-                    if (graph[v][k].cost <= delta){
-                        req r;
-                        r.w = graph[v][k].to;
-                        r.d = distances[v] + graph[v][k].cost;
-                        REQ.push_back(r);
-                    }
-                }
-                S.push_back(v);
-            }
-            B[j].clear();
+        while (!B[j].empty()) {
             
-            // relax light edges
-            #pragma omp for
-            for (int i=0; i<REQ.size(); i++){
-                relax(REQ[i].w, REQ[i].d, distances, delta);
+            #pragma omp parallel
+            {
+                std::vector<int> vector_j(B[j].begin(), B[j].end());
+                int tid = omp_get_thread_num();
+                
+                #pragma omp for
+                for (int i = 0; i < vector_j.size(); i++) {
+                    int v = vector_j[i];
+                    for (int k = 0; k < graph[v].size(); k++) {
+                        if (graph[v][k].cost <= delta) {
+                            req r;
+                            r.w = graph[v][k].to;
+                            r.d = distances[v] + graph[v][k].cost;
+                            REQ_local[tid].push_back(r);
+                        }
+                    }
+                    S_local[tid].push_back(v);
+                }
+
+
+                #pragma omp single
+                B[j].clear();
+
+                for (int i = 0; i < REQ_local[tid].size(); i++) {
+                    relax(REQ_local[tid][i].w, REQ_local[tid][i].d, distances, delta);
+                }
+                
+                REQ_local[tid].clear();
+            }
+
+
+            for (const auto &local_s : S_local) {
+                S.insert(S.end(), local_s.begin(), local_s.end());
+            }
+
+            for (auto &local_s : S_local) {
+                local_s.clear();
             }
         }
-        REQ.clear();
 
-        // heavy edges
-        #pragma omp for
-        for (int i=0; i<S.size(); i++) {
+        // Heavy edges
+        #pragma omp parallel for
+        for (int i = 0; i < S.size(); i++) {
             int v = S[i];
-            for (int k=0; k<graph[v].size(); k++){
-                // heavy edge requests
+            for (int k = 0; k < graph[v].size(); k++) {
                 if (graph[v][k].cost > delta) {
-                    req r;
-                    r.w = graph[v][k].to;
-                    r.d = distances[v] + graph[v][k].cost;
-                    REQ.push_back(r);
+                    relax(graph[v][k].to, distances[v] + graph[v][k].cost, distances, delta);
                 }
             }
         }
-        
-        #pragma omp for 
-        for (int i=0; i<REQ.size(); i++)
-            relax(REQ[i].w, REQ[i].d, distances, delta);
         j++;
     }
 }
@@ -175,7 +275,7 @@ bool correctness_check()
     // Run Delta-stepping algorithm
     int delta = 50;
     std::vector<int> delta_stepping_distances;
-    delta_stepping_parallel(0, graph, delta_stepping_distances, delta);
+    delta_stepping_parallel_local(0, graph, delta_stepping_distances, delta);
 
     // cout << "Vertex\tDistance from Source\n";
     // for (int i = 0; i < delta_stepping_distances.size(); ++i)
@@ -208,9 +308,9 @@ int main(int argc, char* argv[])
     string input = argv[1];
     string file_path;
 
-    omp_set_num_threads(8);
+    omp_set_num_threads(4);
 
-    printf("%d\n", correctness_check());
+    // printf("%d\n", correctness_check());
 
     if (input == "NY") {
         file_path = "data/USA-road-d.NY.gr";
@@ -231,10 +331,11 @@ int main(int argc, char* argv[])
     cout << "Number of vertices: " << num_vertices << endl;
     cout << "Number of edges: " << num_edges << endl;
 
+    distances_mutex = new std::vector<std::mutex>(num_vertices);
     vector<int> distances;
     vector<int> distances_delta_s;
     vector<int> distances_delta_p;
-    int delta = 2000;
+    int delta = 200;
 
     // Call the delta_stepping() function
     // double t_start_p = omp_get_wtime();
@@ -247,7 +348,7 @@ int main(int argc, char* argv[])
     double dijks_time = omp_get_wtime() - t_dijk_start;
 
     double t_start_p = omp_get_wtime();
-    delta_stepping_parallel(0, graph, distances_delta_p, delta);
+    delta_stepping_parallel_local(0, graph, distances_delta_p, delta);
     double delta_time_parallel = omp_get_wtime() - t_start_p;
 
 
